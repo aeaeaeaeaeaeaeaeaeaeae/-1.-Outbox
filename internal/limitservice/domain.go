@@ -1,6 +1,8 @@
 package limitservice
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	ErrNotFound       = errors.New("заявка не найдена")
@@ -45,9 +47,40 @@ type BlockRequest struct {
 	Currency      string
 }
 
+type LimitOperation struct {
+	BlockRequest
+	State   OperationState
+	BlockId string
+}
+
+type OperationState string
+
+const (
+	OperationPending   OperationState = "PENDING"
+	OperationConfirmed OperationState = "CONFIRMED"
+	OperationDeclined  OperationState = "DECLINED"
+)
+
+var ErrInvalidStatus = errors.New("status is incorrect")
+var ErrInvalidInput = errors.New("invalid input")
+var ErrLimitDeclined = errors.New("lender declined block")
+var ErrBlockPending = errors.New("block result not established")
+
 type BlockResult struct {
 	Outcome BlockOutcome
 	BlockID string
+}
+
+type limitBlockedPayload struct {
+	EventID       string `json:"event_id"`
+	EventType     string `json:"event_type"`
+	OccurredAt    string `json:"occurred_at"`
+	ApplicationID string `json:"application_id"`
+	ClientID      string `json:"client_id"`
+	LenderID      string `json:"lender_id"`
+	LenderBlockID string `json:"lender_block_id"`
+	AmountMinor   string `json:"amount_minor"`
+	Currency      string `json:"currency"`
 }
 
 type KafkaMessage struct {
