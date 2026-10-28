@@ -52,7 +52,7 @@ func TestBlockLenderLimit_Stage1(t *testing.T) {
 			}
 			repo.findErr = tt.findErr
 			lender := &fakeLender{}
-			svc := limitservice.NewService(repo, lender)
+			svc := limitservice.NewService(0, repo, lender)
 
 			got, err := svc.BlockLenderLimit(context.Background(), tt.inputID)
 

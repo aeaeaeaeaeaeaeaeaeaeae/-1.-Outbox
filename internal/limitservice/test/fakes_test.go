@@ -3,7 +3,6 @@ package test
 import (
 	"awesomeProject7/internal/limitservice"
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -142,6 +141,12 @@ type fakeLender struct {
 	// так моделируются потерянный ответ, таймаут, нарушение контракта.
 	respond func(call int, res limitservice.BlockResult) (limitservice.BlockResult, error)
 
+	// unavailable — кредитор недоступен: BlockLimit возвращает эту ошибку,
+	// НЕ выполнив действие (запрос до кредитора не дошёл).
+	unavailable error
+	lookupErr   error        // если задано, LookupBlock возвращает эту ошибку
+	lookups     []lookupCall // параметры каждого вызова LookupBlock
+
 	blockCalls  int
 	lookupCalls int
 }
@@ -149,6 +154,9 @@ type fakeLender struct {
 func (l *fakeLender) BlockLimit(_ context.Context, req limitservice.BlockRequest) (limitservice.BlockResult, error) {
 	l.blockCalls++
 	l.requests = append(l.requests, req)
+	if l.unavailable != nil {
+		return limitservice.BlockResult{}, l.unavailable
+	}
 	if l.results == nil {
 		l.results = map[string]limitservice.BlockResult{}
 	}
@@ -169,10 +177,21 @@ func (l *fakeLender) BlockLimit(_ context.Context, req limitservice.BlockRequest
 	return res, nil
 }
 
-func (l *fakeLender) LookupBlock(context.Context, string, string) (limitservice.BlockResult, error) {
+// LookupBlock отвечает по тому, что кредитор уже сделал: если блокировка с таким
+// OperationID есть — её результат, если нет — unknown (запрос до кредитора не дошёл).
+func (l *fakeLender) LookupBlock(_ context.Context, lenderID, operationID string) (limitservice.BlockResult, error) {
 	l.lookupCalls++
-	return limitservice.BlockResult{}, errors.New("fakeLender: LookupBlock не настроен")
+	l.lookups = append(l.lookups, lookupCall{LenderID: lenderID, OperationID: operationID})
+	if l.lookupErr != nil {
+		return limitservice.BlockResult{}, l.lookupErr
+	}
+	if res, ok := l.results[operationID]; ok {
+		return res, nil
+	}
+	return limitservice.BlockResult{Outcome: limitservice.BlockUnknown}, nil
 }
+
+type lookupCall struct{ LenderID, OperationID string }
 
 // confirmedBlocks — сколько блокировок реально существует у кредитора.
 func (l *fakeLender) confirmedBlocks() int {

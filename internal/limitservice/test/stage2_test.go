@@ -46,7 +46,7 @@ func TestStage2_Confirmed(t *testing.T) {
 	initial := approvedApp()
 	repo := newFakeRepo(initial)
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	got, err := svc.BlockLenderLimit(context.Background(), appID)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestStage2_Declined(t *testing.T) {
 	lender := &fakeLender{decide: func(limitservice.BlockRequest) limitservice.BlockResult {
 		return limitservice.BlockResult{Outcome: limitservice.BlockDeclined}
 	}}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	_, err := svc.BlockLenderLimit(context.Background(), appID)
 	if !errors.Is(err, limitservice.ErrLimitDeclined) {
@@ -181,7 +181,7 @@ func TestStage2_ResultNotEstablished(t *testing.T) {
 			initial := approvedApp()
 			repo := newFakeRepo(initial)
 			lender := &fakeLender{respond: tt.respond}
-			svc := limitservice.NewService(repo, lender)
+			svc := limitservice.NewService(0, repo, lender)
 
 			_, err := svc.BlockLenderLimit(context.Background(), appID)
 
@@ -213,7 +213,7 @@ func TestStage2_RetryAfterLostResponse(t *testing.T) {
 		}
 		return res, nil
 	}}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	if _, err := svc.BlockLenderLimit(context.Background(), appID); err == nil {
 		t.Fatal("первый вызов: ожидалась ошибка")
@@ -250,7 +250,7 @@ func TestStage2_ApplicationRejectedWhileWaiting(t *testing.T) {
 		repo.apps[appID] = a
 		return res, nil
 	}}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	_, err := svc.BlockLenderLimit(context.Background(), appID)
 	if !errors.Is(err, limitservice.ErrConflict) {
@@ -271,7 +271,7 @@ func TestStage2_OutboxFailure(t *testing.T) {
 	errDB := errors.New("db: connection lost")
 	repo.outboxErr = errDB
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	_, err := svc.BlockLenderLimit(context.Background(), appID)
 	if !errors.Is(err, errDB) {

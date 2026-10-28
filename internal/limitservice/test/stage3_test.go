@@ -17,7 +17,7 @@ func TestStage3_RetryAfterDeclined(t *testing.T) {
 	lender := &fakeLender{decide: func(limitservice.BlockRequest) limitservice.BlockResult {
 		return limitservice.BlockResult{Outcome: limitservice.BlockDeclined}
 	}}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	for i := 1; i <= 2; i++ {
 		_, err := svc.BlockLenderLimit(context.Background(), appID)
@@ -44,7 +44,7 @@ func TestStage3_RetryAfterDeclined(t *testing.T) {
 func TestStage3_RetryAfterSuccess(t *testing.T) {
 	repo := newFakeRepo(approvedApp())
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	first, err := svc.BlockLenderLimit(context.Background(), appID)
 	if err != nil {
@@ -70,7 +70,7 @@ func TestStage3_RetryAfterSuccess(t *testing.T) {
 func TestStage3_RetryAfterContractSigned(t *testing.T) {
 	repo := newFakeRepo(approvedApp())
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	if _, err := svc.BlockLenderLimit(context.Background(), appID); err != nil {
 		t.Fatalf("первый вызов: %v", err)
@@ -112,7 +112,7 @@ func TestStage3_ConfirmedOperationButApplicationNotBlocked(t *testing.T) {
 		BlockId: "blk-old",
 	}
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	got, err := svc.BlockLenderLimit(context.Background(), appID)
 
@@ -139,7 +139,7 @@ func TestStage3_ConfirmedOperationButApplicationNotBlocked(t *testing.T) {
 func TestStage3_ConcurrentCallCompletedFirst(t *testing.T) {
 	repo := newFakeRepo(approvedApp())
 	lender := &fakeLender{}
-	svc := limitservice.NewService(repo, lender)
+	svc := limitservice.NewService(0, repo, lender)
 
 	var second limitservice.Application
 	var secondErr error

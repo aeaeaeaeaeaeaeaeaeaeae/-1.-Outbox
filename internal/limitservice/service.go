@@ -25,14 +25,19 @@ type ApplicationRepository interface {
 }
 
 type Service struct {
-	Applications ApplicationRepository
-	Lender       LenderClient
+	Applications  ApplicationRepository
+	Lender        LenderClient
+	lenderTimeout time.Duration
 }
 
-func NewService(application ApplicationRepository, lender LenderClient) *Service {
+func NewService(timeout time.Duration, application ApplicationRepository, lender LenderClient) *Service {
+	if timeout <= 0 {
+		timeout = time.Second * 3
+	}
 	return &Service{
-		Applications: application,
-		Lender:       lender,
+		Applications:  application,
+		Lender:        lender,
+		lenderTimeout: timeout,
 	}
 }
 
@@ -80,9 +85,13 @@ func (s *Service) BackgroundWorker(ctx context.Context) {
 					continue
 				}
 
-				res, err := s.Lender.LookupBlock(ctx, v.LenderID, v.OperationID)
+				lookupctx, cancel := context.WithTimeout(ctx, s.lenderTimeout)
+				res, err := s.Lender.LookupBlock(lookupctx, v.LenderID, v.OperationID)
+				cancel()
 				if err != nil || res.Outcome == BlockUnknown {
-					res, err = s.Lender.BlockLimit(ctx, v.BlockRequest)
+					blockLimitTimeout, cancel := context.WithTimeout(ctx, s.lenderTimeout)
+					res, err = s.Lender.BlockLimit(blockLimitTimeout, v.BlockRequest)
+					cancel()
 					if err != nil {
 						continue
 					}
@@ -156,11 +165,13 @@ func (s *Service) BlockLenderLimit(ctx context.Context, applicationID string) (A
 			return Application{}, fmt.Errorf("operation confirmed %s, but application still %s", limitOperation.BlockId, application.Status)
 		}
 
-		blockRes, err := s.Lender.BlockLimit(ctx, limitOperation.BlockRequest)
+		blockLimitCtx, cancel := context.WithTimeout(ctx, s.lenderTimeout)
+
+		blockRes, err := s.Lender.BlockLimit(blockLimitCtx, limitOperation.BlockRequest)
+		cancel()
 		if err != nil {
 			return Application{}, fmt.Errorf("%w: %w", ErrBlockPending, err)
 		}
-
 		app, err := s.applyResult(ctx, application.ID, application, limitOperation, blockRes)
 		if err != nil {
 			return Application{}, fmt.Errorf("error while apply result: %w", err)
