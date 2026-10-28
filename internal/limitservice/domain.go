@@ -31,6 +31,25 @@ type Application struct {
 	Version              int64
 }
 
+type KafkaMessage struct {
+	EventID string
+	Topic   string
+	Key     string
+	Payload []byte
+}
+
+type limitBlockedPayload struct {
+	EventID       string `json:"event_id"`
+	EventType     string `json:"event_type"`
+	OccurredAt    string `json:"occurred_at"`
+	ApplicationID string `json:"application_id"`
+	ClientID      string `json:"client_id"`
+	LenderID      string `json:"lender_id"`
+	LenderBlockID string `json:"lender_block_id"`
+	AmountMinor   string `json:"amount_minor"`
+	Currency      string `json:"currency"`
+}
+
 type BlockOutcome string
 
 const (
@@ -69,23 +88,4 @@ var ErrBlockPending = errors.New("block result not established")
 type BlockResult struct {
 	Outcome BlockOutcome
 	BlockID string
-}
-
-type limitBlockedPayload struct {
-	EventID       string `json:"event_id"`
-	EventType     string `json:"event_type"`
-	OccurredAt    string `json:"occurred_at"`
-	ApplicationID string `json:"application_id"`
-	ClientID      string `json:"client_id"`
-	LenderID      string `json:"lender_id"`
-	LenderBlockID string `json:"lender_block_id"`
-	AmountMinor   string `json:"amount_minor"`
-	Currency      string `json:"currency"`
-}
-
-type KafkaMessage struct {
-	EventID string
-	Topic   string
-	Key     string
-	Payload []byte
 }

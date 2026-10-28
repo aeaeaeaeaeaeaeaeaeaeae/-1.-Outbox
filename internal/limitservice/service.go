@@ -3,6 +3,7 @@ package limitservice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -77,9 +78,17 @@ func (s *Service) BlockLenderLimit(ctx context.Context, applicationID string) (A
 			return Application{}, fmt.Errorf("error while insert block operation: %w", err)
 		}
 
+		if limitOperation.State == OperationDeclined {
+			return Application{}, ErrLimitDeclined
+		}
+
+		if limitOperation.State == OperationConfirmed {
+			return Application{}, fmt.Errorf("operation confirmed %s, but application still %s", limitOperation.BlockId, application.Status)
+		}
+
 		blockRes, err := s.Lender.BlockLimit(ctx, limitOperation.BlockRequest)
 		if err != nil {
-			return Application{}, fmt.Errorf("error while blocking: %w", err)
+			return Application{}, fmt.Errorf("%w: %w", ErrBlockPending, err)
 		}
 
 		if blockRes.Outcome == BlockConfirmed && blockRes.BlockID != "" {
@@ -92,6 +101,16 @@ func (s *Service) BlockLenderLimit(ctx context.Context, applicationID string) (A
 
 			app, err := s.Applications.Outbox(ctx, limitOperation, kafkaMessage)
 			if err != nil {
+				if errors.Is(err, ErrConflict) {
+					currentApplication, currentErr := s.Applications.FindByID(ctx, applicationID)
+					if currentErr != nil {
+						return Application{}, currentErr
+					}
+					if currentApplication.Status == LimitBlocked || currentApplication.Status == ContractSigned {
+						return currentApplication, nil
+					}
+					return Application{}, fmt.Errorf("%w: %s", ErrConflict, currentApplication.Status)
+				}
 				return Application{}, fmt.Errorf("error while outbox: %w", err)
 			}
 
