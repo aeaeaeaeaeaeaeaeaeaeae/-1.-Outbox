@@ -21,11 +21,30 @@ type fakeRepo struct {
 
 	findErr   error // если задано, FindByID возвращает эту ошибку (сбой БД)
 	outboxErr error // если задано, Outbox возвращает эту ошибку и ничего не меняет
+	// если задано, FindPendingOperations возвращает эту ошибку
+	findPendingErr error
 
-	findCalls     int
-	insertCalls   int
-	outboxCalls   int
-	declinedCalls int
+	findCalls        int
+	insertCalls      int
+	outboxCalls      int
+	declinedCalls    int
+	findPendingCalls int
+}
+
+// FindPendingOperations — как SELECT ... WHERE state = 'PENDING'. Возраст операции
+// фейк не учитывает: в тестах все операции считаются «зависшими».
+func (r *fakeRepo) FindPendingOperations(context.Context) ([]limitservice.LimitOperation, error) {
+	r.findPendingCalls++
+	if r.findPendingErr != nil {
+		return nil, r.findPendingErr
+	}
+	var ops []limitservice.LimitOperation
+	for _, op := range r.ops {
+		if op.State == limitservice.OperationPending {
+			ops = append(ops, op)
+		}
+	}
+	return ops, nil
 }
 
 func newFakeRepo(apps ...limitservice.Application) *fakeRepo {

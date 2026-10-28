@@ -21,6 +21,7 @@ type ApplicationRepository interface {
 	InsertBlockOperation(ctx context.Context, application Application) (LimitOperation, error)
 	Outbox(ctx context.Context, limitOperation LimitOperation, msg KafkaMessage) (Application, error)
 	MarkDeclined(ctx context.Context, applicationID, operationID string) error
+	FindPendingOperations(ctx context.Context) ([]LimitOperation, error)
 }
 
 type Service struct {
@@ -61,6 +62,75 @@ func kafkaEvent(app Application, op LimitOperation) (KafkaMessage, error) {
 	}, nil
 }
 
+func (s *Service) BackgroundWorker(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute * 3)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			limitOperations, err := s.Applications.FindPendingOperations(ctx)
+			if err != nil {
+				continue
+			}
+
+			for _, v := range limitOperations {
+				application, err := s.Applications.FindByID(ctx, v.ApplicationID)
+				if err != nil {
+					continue
+				}
+
+				res, err := s.Lender.LookupBlock(ctx, v.LenderID, v.OperationID)
+				if err != nil || res.Outcome == BlockUnknown {
+					res, err = s.Lender.BlockLimit(ctx, v.BlockRequest)
+					if err != nil {
+						continue
+					}
+				}
+				s.applyResult(ctx, application.ID, application, v, res)
+
+			}
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) applyResult(ctx context.Context, applicationID string, application Application, limitOperation LimitOperation, blockRes BlockResult) (Application, error) {
+	if blockRes.Outcome == BlockConfirmed && blockRes.BlockID != "" {
+		limitOperation.BlockId = blockRes.BlockID
+
+		kafkaMessage, err := kafkaEvent(application, limitOperation)
+		if err != nil {
+			return Application{}, fmt.Errorf("error while getting kafka message: %w", err)
+		}
+
+		app, err := s.Applications.Outbox(ctx, limitOperation, kafkaMessage)
+		if err != nil {
+			if errors.Is(err, ErrConflict) {
+				currentApplication, currentErr := s.Applications.FindByID(ctx, applicationID)
+				if currentErr != nil {
+					return Application{}, currentErr
+				}
+				if currentApplication.Status == LimitBlocked || currentApplication.Status == ContractSigned {
+					return currentApplication, nil
+				}
+				return Application{}, fmt.Errorf("%w: %s", ErrConflict, currentApplication.Status)
+			}
+			return Application{}, fmt.Errorf("error while outbox: %w", err)
+		}
+
+		return app, nil
+	} else if blockRes.Outcome == BlockDeclined {
+		if err := s.Applications.MarkDeclined(ctx, limitOperation.ApplicationID, limitOperation.OperationID); err != nil {
+			return Application{}, fmt.Errorf("error while making declined: %w", err)
+		}
+		return application, ErrLimitDeclined
+	}
+	return application, fmt.Errorf("%w: outcome %q, block id %q", ErrBlockPending, blockRes.Outcome, blockRes.BlockID)
+}
+
 func (s *Service) BlockLenderLimit(ctx context.Context, applicationID string) (Application, error) {
 	if _, err := uuid.Parse(applicationID); err != nil {
 		return Application{}, fmt.Errorf("%w: application id %q: %v", ErrInvalidInput, applicationID, err)
@@ -91,37 +161,12 @@ func (s *Service) BlockLenderLimit(ctx context.Context, applicationID string) (A
 			return Application{}, fmt.Errorf("%w: %w", ErrBlockPending, err)
 		}
 
-		if blockRes.Outcome == BlockConfirmed && blockRes.BlockID != "" {
-			limitOperation.BlockId = blockRes.BlockID
-
-			kafkaMessage, err := kafkaEvent(application, limitOperation)
-			if err != nil {
-				return Application{}, fmt.Errorf("error while getting kafka message: %w", err)
-			}
-
-			app, err := s.Applications.Outbox(ctx, limitOperation, kafkaMessage)
-			if err != nil {
-				if errors.Is(err, ErrConflict) {
-					currentApplication, currentErr := s.Applications.FindByID(ctx, applicationID)
-					if currentErr != nil {
-						return Application{}, currentErr
-					}
-					if currentApplication.Status == LimitBlocked || currentApplication.Status == ContractSigned {
-						return currentApplication, nil
-					}
-					return Application{}, fmt.Errorf("%w: %s", ErrConflict, currentApplication.Status)
-				}
-				return Application{}, fmt.Errorf("error while outbox: %w", err)
-			}
-
-			return app, nil
-		} else if blockRes.Outcome == BlockDeclined {
-			if err := s.Applications.MarkDeclined(ctx, limitOperation.ApplicationID, limitOperation.OperationID); err != nil {
-				return Application{}, fmt.Errorf("error while making declined: %w", err)
-			}
-			return application, ErrLimitDeclined
+		app, err := s.applyResult(ctx, application.ID, application, limitOperation, blockRes)
+		if err != nil {
+			return Application{}, fmt.Errorf("error while apply result: %w", err)
 		}
-		return application, fmt.Errorf("%w: outcome %q, block id %q", ErrBlockPending, blockRes.Outcome, blockRes.BlockID)
+
+		return app, nil
 	} else if status == LimitBlocked || status == ContractSigned {
 		return application, nil
 	}

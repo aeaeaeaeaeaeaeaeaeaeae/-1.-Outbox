@@ -142,3 +142,37 @@ func (r *Repository) MarkDeclined(ctx context.Context, applicationId, operationI
 	}
 	return nil
 }
+
+func (r *Repository) FindPendingOperations(ctx context.Context) ([]limitservice.LimitOperation, error) {
+	const query = `
+	SELECT operation_id, application_id, lender_id, amount_minor, currency, state, block_id
+	FROM limit_block_operation 
+	WHERE state = 'PENDING' AND updated_at < now() - make_interval(secs => 120)
+	ORDER BY updated_at
+	LIMIT 100
+	`
+
+	ctx, cancel := context.WithTimeout(ctx, r.dbTimeout)
+	defer cancel()
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	operations := make([]limitservice.LimitOperation, 0)
+	for rows.Next() {
+		var op limitservice.LimitOperation
+		if err := rows.Scan(&op.OperationID, &op.ApplicationID, &op.LenderID, &op.AmountMinor, &op.Currency, &op.State, &op.BlockId); err != nil {
+			return nil, err
+		}
+		operations = append(operations, op)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error while iterating: %w", err)
+	}
+
+	return operations, nil
+}
