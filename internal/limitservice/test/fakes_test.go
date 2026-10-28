@@ -20,6 +20,8 @@ type fakeRepo struct {
 
 	findErr   error // если задано, FindByID возвращает эту ошибку (сбой БД)
 	outboxErr error // если задано, Outbox возвращает эту ошибку и ничего не меняет
+	// onOutbox вызывается в начале Outbox с переданным контекстом.
+	onOutbox func(ctx context.Context)
 	// если задано, FindPendingOperations возвращает эту ошибку
 	findPendingErr error
 
@@ -88,8 +90,11 @@ func (r *fakeRepo) InsertBlockOperation(_ context.Context, app limitservice.Appl
 }
 
 // Outbox — как транзакция из трёх запросов: всё или ничего.
-func (r *fakeRepo) Outbox(_ context.Context, op limitservice.LimitOperation, msg limitservice.KafkaMessage) (limitservice.Application, error) {
+func (r *fakeRepo) Outbox(ctx context.Context, op limitservice.LimitOperation, msg limitservice.KafkaMessage) (limitservice.Application, error) {
 	r.outboxCalls++
+	if r.onOutbox != nil {
+		r.onOutbox(ctx)
+	}
 	if r.outboxErr != nil {
 		return limitservice.Application{}, r.outboxErr
 	}
@@ -144,6 +149,7 @@ type fakeLender struct {
 	// unavailable — кредитор недоступен: BlockLimit возвращает эту ошибку,
 	// НЕ выполнив действие (запрос до кредитора не дошёл).
 	unavailable error
+	hang        bool         // BlockLimit не отвечает, пока не истечёт ctx
 	lookupErr   error        // если задано, LookupBlock возвращает эту ошибку
 	lookups     []lookupCall // параметры каждого вызова LookupBlock
 
@@ -151,9 +157,13 @@ type fakeLender struct {
 	lookupCalls int
 }
 
-func (l *fakeLender) BlockLimit(_ context.Context, req limitservice.BlockRequest) (limitservice.BlockResult, error) {
+func (l *fakeLender) BlockLimit(ctx context.Context, req limitservice.BlockRequest) (limitservice.BlockResult, error) {
 	l.blockCalls++
 	l.requests = append(l.requests, req)
+	if l.hang {
+		<-ctx.Done() // кредитор завис: ответа нет, пока вызывающий не перестанет ждать
+		return limitservice.BlockResult{}, ctx.Err()
+	}
 	if l.unavailable != nil {
 		return limitservice.BlockResult{}, l.unavailable
 	}
