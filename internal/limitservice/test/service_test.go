@@ -42,8 +42,6 @@ func TestBlockLenderLimit_Stage1(t *testing.T) {
 		{name: "REJECTED нельзя блокировать", inputID: id, stored: app(limitservice.Rejected, ""), wantErr: limitservice.ErrInvalidStatus, wantApp: app(limitservice.Rejected, ""), wantFind: 1},
 		{name: "повтор после LIMIT_BLOCKED", inputID: id, stored: app(limitservice.LimitBlocked, "blk-1"), wantApp: app(limitservice.LimitBlocked, "blk-1"), wantFind: 1},
 		{name: "повтор после CONTRACT_SIGNED", inputID: id, stored: app(limitservice.ContractSigned, "blk-1"), wantApp: app(limitservice.ContractSigned, "blk-1"), wantFind: 1},
-		// блокировка ещё не реализована. На этапе 2 этот случай заменится
-		{name: "SCORING_APPROVED пока не реализован", inputID: id, stored: app(limitservice.ScoringApproved, ""), wantErr: limitservice.ErrNotImplemented, wantFind: 1},
 	}
 
 	for _, tt := range tests {
@@ -83,6 +81,11 @@ func TestBlockLenderLimit_Stage1(t *testing.T) {
 
 			if lender.blockCalls != 0 || lender.lookupCalls != 0 {
 				t.Errorf("кредитор вызван: BlockLimit=%d, LookupBlock=%d", lender.blockCalls, lender.lookupCalls)
+			}
+
+			if repo.insertCalls != 0 || repo.outboxCalls != 0 || repo.declinedCalls != 0 {
+				t.Errorf("репозиторий менял данные: InsertBlockOperation=%d, Outbox=%d, MarkDeclined=%d",
+					repo.insertCalls, repo.outboxCalls, repo.declinedCalls)
 			}
 
 			if tt.stored != nil && repo.apps[id] != *tt.stored {
