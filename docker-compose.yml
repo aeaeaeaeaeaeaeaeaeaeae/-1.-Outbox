@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: outbox
+      POSTGRES_PASSWORD: outbox
+      POSTGRES_DB: outbox
+    ports:
+      - "5432:5432"
+    volumes:
+      # Только .up-миграции, затем тестовые данные. Скрипты выполняются по алфавиту.
+      - ./internal/postgres/migrations/0001_applications.up.sql:/docker-entrypoint-initdb.d/0001_applications.up.sql:ro
+      - ./internal/postgres/migrations/0002_limit_block.up.sql:/docker-entrypoint-initdb.d/0002_limit_block.up.sql:ro
+      - ./db/seed.sql:/docker-entrypoint-initdb.d/0003_seed.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U outbox -d outbox"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgres://outbox:outbox@db:5432/outbox?sslmode=disable
+      HTTP_ADDR: ":8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:
